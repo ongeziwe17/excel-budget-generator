@@ -1,411 +1,514 @@
 """Monthly entry worksheet builder."""
 
-from openpyxl.styles import Font, PatternFill
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .base import BaseSheetBuilder
 
 
 class MonthlyEntrySheetBuilder(BaseSheetBuilder):
-    """Build the Monthly Entry worksheet."""
+    """Build the Monthly Entry worksheet with budget vs actual tracking."""
+
+    grocery_table_name = "GroceryDetailTable"
+    custom_variable_table_name = "VariableExpenseTable"
 
     def build(self, workbook):
         worksheet = workbook.create_sheet("Monthly Entry")
         worksheet.sheet_view.showGridLines = False
+        self._configure_columns(worksheet)
+        self._create_title_block(worksheet)
+        self.create_month_header_grid(worksheet, title_row=5, subtitle_row=6)
+        self._create_core_sections(worksheet)
+        grocery_table_end = self._create_grocery_detail_table(worksheet, start_row=49)
+        custom_table_end = self._create_custom_variable_table(worksheet, start_row=grocery_table_end + 4)
+        self._create_detail_notes(worksheet, custom_table_end + 3)
+        self._apply_variance_formatting(worksheet, grocery_table_end, custom_table_end)
+        return worksheet
 
+    def _configure_columns(self, worksheet) -> None:
         worksheet.column_dimensions["A"].width = 3
-        worksheet.column_dimensions["B"].width = 28
-        for index in range(12):
-            worksheet.column_dimensions[get_column_letter(3 + index)].width = 14
-        worksheet.column_dimensions["O"].width = 16
-        worksheet.column_dimensions["Q"].hidden = True
-        worksheet.column_dimensions["R"].hidden = True
+        worksheet.column_dimensions["B"].width = 34
+        for index in range(len(self.config.months)):
+            worksheet.column_dimensions[get_column_letter(self.month_budget_col(index))].width = 12
+            worksheet.column_dimensions[get_column_letter(self.month_actual_col(index))].width = 12
+            worksheet.column_dimensions[get_column_letter(self.month_variance_col(index))].width = 12
+        worksheet.column_dimensions[get_column_letter(self.year_budget_col())].width = 14
+        worksheet.column_dimensions[get_column_letter(self.year_actual_col())].width = 14
+        worksheet.column_dimensions[get_column_letter(self.year_variance_col())].width = 14
 
-        worksheet.merge_cells("B2:O2")
+    def _create_title_block(self, worksheet) -> None:
+        worksheet.merge_cells(start_row=2, start_column=2, end_row=2, end_column=self.last_data_col())
         worksheet["B2"] = "MONTHLY DATA ENTRY"
         worksheet["B2"].font = Font(size=18, bold=True, color=self.styles.palette.header_dark)
         worksheet["B2"].alignment = self.styles.left_alignment()
         worksheet.row_dimensions[2].height = 30
 
-        worksheet.merge_cells("B3:O3")
-        worksheet["B3"] = "Enter your actual income and expenses in the BLUE cells below."
+        worksheet.merge_cells(start_row=3, start_column=2, end_row=3, end_column=self.last_data_col())
+        worksheet["B3"] = (
+            "Enter planned amounts in Budget cells and real cash movement in Actual cells. Variance = Actual - Budget."
+        )
         worksheet["B3"].font = Font(size=10, italic=True, color="666666")
 
-        worksheet["B5"] = "CATEGORY"
-        worksheet["B5"].font = self.styles.header_font()
-        worksheet["B5"].fill = self.styles.header_fill()
-        worksheet["B5"].alignment = self.styles.left_alignment()
-        worksheet["B5"].border = self.styles.thin_border
+    def _create_core_sections(self, worksheet) -> None:
+        self.create_section_header(worksheet, 7, "INCOME")
+        self.create_input_row(worksheet, self.rows.net_income, "Net Income Received")
 
-        for index, month in enumerate(self.config.months):
-            col = get_column_letter(3 + index)
-            worksheet[f"{col}5"] = month
-            self.set_standard_header(worksheet[f"{col}5"])
-
-        worksheet["O5"] = "YEAR TOTAL"
-        self.set_standard_header(worksheet["O5"])
-        worksheet.row_dimensions[5].height = 25
-
-        row = 7
-        self.create_section_header(worksheet, row, "INCOME")
-        row += 1
-        self.create_input_row(worksheet, row, "Net Income Received")
-        net_income_row = row
-        row += 2
-
-        self.create_section_header(worksheet, row, "FIXED EXPENSES")
-        row += 1
-        for expense in ["Data", "Transport", "Subscriptions", "TFG Debit", "Family Support"]:
-            self.create_input_row(worksheet, row, expense, indent=True)
-            row += 1
+        self.create_section_header(worksheet, 10, "FIXED EXPENSES")
+        for row, label in [
+            (self.rows.data, "Data"),
+            (self.rows.transport, "Transport"),
+            (self.rows.subscriptions, "Subscriptions"),
+            (self.rows.tfg_debit, "TFG Debit"),
+            (self.rows.family_support, "Family Support"),
+        ]:
+            self.create_input_row(worksheet, row, label, indent=True)
 
         self.create_formula_row(
             worksheet,
-            row,
+            self.rows.tithe,
             "Tithe (10% of Net Income)",
-            f"={{col}}{net_income_row}*0.1",
+            lambda index, _month: f"={self.month_budget_letter(index)}{self.rows.net_income}*0.1",
+            lambda index, _month: f"={self.month_actual_letter(index)}{self.rows.net_income}*0.1",
             indent=True,
         )
-        row += 2
+        self.create_input_row(worksheet, self.rows.rent_housing, "Rent / Housing", indent=True)
 
-        self.create_section_header(worksheet, row, "VARIABLE EXPENSES")
-        row += 1
-        for expense in [
-            "Groceries",
-            "Eating Out",
-            "Lunch",
-            "Haircuts",
-            "Clothing",
-            "Random Spending",
+        self.create_section_header(worksheet, 19, "VARIABLE EXPENSES")
+        self.create_formula_row(
+            worksheet,
+            self.rows.groceries,
+            "Groceries (rolls up from detail table below)",
+            lambda _index, month: f"=SUM({self.grocery_table_name}[{month} Budget])",
+            lambda _index, month: f"=SUM({self.grocery_table_name}[{month} Actual])",
+            indent=True,
+        )
+        for row, label in [
+            (self.rows.eating_out, "Eating Out"),
+            (self.rows.lunch, "Lunch"),
+            (self.rows.haircuts, "Haircuts"),
+            (self.rows.clothing, "Clothing"),
+            (self.rows.random_spending, "Random Spending"),
         ]:
-            self.create_input_row(worksheet, row, expense, indent=True)
-            row += 1
-
-        row += 1
-        self.create_section_header(worksheet, row, "FUTURE RENT (Toggle On/Off)")
-        row += 1
-        self._create_rent_rows(worksheet, row)
-        row += 4
-
-        self.create_section_header(worksheet, row, "SAVINGS & TRANSFERS")
-        row += 1
-        self.create_input_row(worksheet, row, "Transfer to Savings")
-        savings_row = row
-        row += 1
-        self.create_input_row(worksheet, row, "Starting Savings Balance")
-        starting_savings_row = row
-        row += 2
-
-        self.create_section_header(worksheet, row, "BONUSES RECEIVED")
-        row += 1
-        self.create_input_row(worksheet, row, "Bonus Received")
-        bonus_row = row
-        row += 2
-
-        self.create_section_header(worksheet, row, "UNEXPECTED EXPENSES")
-        row += 1
-        self.create_input_row(worksheet, row, "Unexpected Expenses")
-        unexpected_row = row
-        row += 2
-
-        self.create_section_header(worksheet, row, "SUMMARY TOTALS")
-        row += 1
-        row = self._create_summary_rows(
+            self.create_input_row(worksheet, row, label, indent=True)
+        self.create_formula_row(
             worksheet,
-            row,
-            net_income_row=net_income_row,
-            bonus_row=bonus_row,
-            savings_row=savings_row,
-            starting_savings_row=starting_savings_row,
-            unexpected_row=unexpected_row,
+            self.rows.custom_variable_total,
+            "Additional Variable Items (rolls up from detail table below)",
+            lambda _index, month: f"=SUM({self.custom_variable_table_name}[{month} Budget])",
+            lambda _index, month: f"=SUM({self.custom_variable_table_name}[{month} Actual])",
+            indent=True,
         )
 
-        self._store_hidden_references(worksheet)
-        return worksheet
+        self.create_section_header(worksheet, 28, "SAVINGS & TRANSFERS")
+        self.create_input_row(worksheet, self.rows.savings_transfer, "Transfer to Savings")
+        self.create_input_row(worksheet, self.rows.starting_savings, "Starting Savings Balance")
 
-    def _create_rent_rows(self, worksheet, row: int) -> None:
-        worksheet[f"B{row}"] = "  Rent Active? (1=Yes, 0=No)"
-        worksheet[f"B{row}"].font = Font(size=10, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
+        self.create_section_header(worksheet, 32, "BONUSES RECEIVED")
+        self.create_input_row(worksheet, self.rows.bonus, "Bonus Received")
 
-        rent_toggle_row = row
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = 0
-            cell.font = self.styles.input_font()
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.center_alignment()
-            cell.number_format = "0"
-        row += 1
+        self.create_section_header(worksheet, 35, "UNEXPECTED EXPENSES")
+        self.create_input_row(worksheet, self.rows.unexpected_expenses, "Unexpected Expenses")
 
-        worksheet[f"B{row}"] = f"  Rent Amount (R{self.config.default_rent_amount:,})"
-        worksheet[f"B{row}"].font = Font(size=10, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
+        self.create_section_header(worksheet, 38, "SUMMARY TOTALS")
+        self._create_total_rows(worksheet)
 
-        rent_amount_row = row
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = self.config.default_rent_amount
-            cell.font = self.styles.input_font()
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-        row += 1
-
-        worksheet[f"B{row}"] = "  Rent Paid (calculated)"
-        worksheet[f"B{row}"].font = Font(size=10, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"=IF({col}{rent_toggle_row}=1,{col}{rent_amount_row},0)"
-            cell.font = self.styles.calc_font()
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = self.styles.calc_font()
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-
-    def _create_summary_rows(
-        self,
-        worksheet,
-        row: int,
-        *,
-        net_income_row: int,
-        bonus_row: int,
-        savings_row: int,
-        starting_savings_row: int,
-        unexpected_row: int,
-    ) -> int:
-        row = self._create_total_fixed_row(worksheet, row)
-        row = self._create_total_variable_row(worksheet, row)
-        row = self._create_total_expenses_row(worksheet, row, unexpected_row=unexpected_row)
-        row = self._create_total_income_row(worksheet, row, net_income_row=net_income_row, bonus_row=bonus_row)
-        row = self._create_surplus_row(worksheet, row, savings_row=savings_row)
-        row = self._create_savings_rate_row(worksheet, row, savings_row=savings_row)
-        row = self._create_running_savings_row(
+    def _create_total_rows(self, worksheet) -> None:
+        self.create_formula_row(
             worksheet,
-            row,
-            starting_savings_row=starting_savings_row,
-            savings_row=savings_row,
+            self.rows.total_fixed,
+            "Total Fixed Expenses",
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [
+                    self.rows.data,
+                    self.rows.transport,
+                    self.rows.subscriptions,
+                    self.rows.tfg_debit,
+                    self.rows.family_support,
+                    self.rows.tithe,
+                    self.rows.rent_housing,
+                ],
+                actual=False,
+            ),
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [
+                    self.rows.data,
+                    self.rows.transport,
+                    self.rows.subscriptions,
+                    self.rows.tfg_debit,
+                    self.rows.family_support,
+                    self.rows.tithe,
+                    self.rows.rent_housing,
+                ],
+                actual=True,
+            ),
+            fill=self.styles.section_fill(),
+            font_color=self.styles.palette.white,
+            bold=True,
         )
-        return row
-
-    def _create_total_fixed_row(self, worksheet, row: int) -> int:
-        worksheet[f"B{row}"] = "Total Fixed Expenses"
-        worksheet[f"B{row}"].font = Font(size=10, bold=True, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = (
-                f"={col}{self.rows.data}+{col}{self.rows.transport}+{col}{self.rows.subscriptions}"
-                f"+{col}{self.rows.tfg_debit}+{col}{self.rows.family_support}+{col}{self.rows.tithe}"
-            )
-            cell.font = self.styles.calc_font()
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = self.styles.calc_font()
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
-
-    def _create_total_variable_row(self, worksheet, row: int) -> int:
-        worksheet[f"B{row}"] = "Total Variable Expenses"
-        worksheet[f"B{row}"].font = Font(size=10, bold=True, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = (
-                f"={col}{self.rows.groceries}+{col}{self.rows.eating_out}+{col}{self.rows.lunch}"
-                f"+{col}{self.rows.haircuts}+{col}{self.rows.clothing}+{col}{self.rows.random_spending}"
-            )
-            cell.font = self.styles.calc_font()
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = self.styles.calc_font()
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
-
-    def _create_total_expenses_row(self, worksheet, row: int, *, unexpected_row: int) -> int:
-        header_fill = self.styles.header_fill()
-        worksheet[f"B{row}"] = "TOTAL ALL EXPENSES"
-        worksheet[f"B{row}"].font = Font(size=11, bold=True, color=self.styles.palette.white)
-        worksheet[f"B{row}"].fill = header_fill
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"={col}{row-2}+{col}{row-1}+{col}{row-13}+{col}{unexpected_row}"
-            cell.font = Font(bold=True, size=11, color=self.styles.palette.white)
-            cell.fill = header_fill
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = Font(bold=True, size=11, color=self.styles.palette.white)
-        worksheet[f"O{row}"].fill = header_fill
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
-
-    def _create_total_income_row(self, worksheet, row: int, *, net_income_row: int, bonus_row: int) -> int:
-        positive_fill = self.styles.positive_fill()
-        worksheet[f"B{row}"] = "TOTAL INCOME"
-        worksheet[f"B{row}"].font = Font(size=11, bold=True, color=self.styles.palette.white)
-        worksheet[f"B{row}"].fill = positive_fill
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"={col}{net_income_row}+{col}{bonus_row}"
-            cell.font = Font(bold=True, size=11, color=self.styles.palette.white)
-            cell.fill = positive_fill
-            cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
-
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = Font(bold=True, size=11, color=self.styles.palette.white)
-        worksheet[f"O{row}"].fill = positive_fill
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
-
-    def _create_surplus_row(self, worksheet, row: int, *, savings_row: int) -> int:
-        accent_fill = PatternFill(
-            start_color=self.styles.palette.accent_blue,
-            end_color=self.styles.palette.accent_blue,
-            fill_type="solid",
+        self.create_formula_row(
+            worksheet,
+            self.rows.total_variable,
+            "Total Variable Expenses",
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [
+                    self.rows.groceries,
+                    self.rows.eating_out,
+                    self.rows.lunch,
+                    self.rows.haircuts,
+                    self.rows.clothing,
+                    self.rows.random_spending,
+                    self.rows.custom_variable_total,
+                ],
+                actual=False,
+            ),
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [
+                    self.rows.groceries,
+                    self.rows.eating_out,
+                    self.rows.lunch,
+                    self.rows.haircuts,
+                    self.rows.clothing,
+                    self.rows.random_spending,
+                    self.rows.custom_variable_total,
+                ],
+                actual=True,
+            ),
+            fill=self.styles.section_fill(),
+            font_color=self.styles.palette.white,
+            bold=True,
         )
-        worksheet[f"B{row}"] = "SURPLUS / (DEFICIT)"
-        worksheet[f"B{row}"].font = Font(size=11, bold=True, color=self.styles.palette.white)
-        worksheet[f"B{row}"].fill = accent_fill
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
+        self.create_formula_row(
+            worksheet,
+            self.rows.total_expenses,
+            "TOTAL ALL EXPENSES",
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [self.rows.total_fixed, self.rows.total_variable, self.rows.unexpected_expenses],
+                actual=False,
+            ),
+            lambda index, _month: self._sum_row_formula(
+                index,
+                [self.rows.total_fixed, self.rows.total_variable, self.rows.unexpected_expenses],
+                actual=True,
+            ),
+            fill=self.styles.header_fill(),
+            font_color=self.styles.palette.white,
+            bold=True,
+        )
+        self.create_formula_row(
+            worksheet,
+            self.rows.total_income,
+            "TOTAL INCOME",
+            lambda index, _month: self._sum_row_formula(index, [self.rows.net_income, self.rows.bonus], actual=False),
+            lambda index, _month: self._sum_row_formula(index, [self.rows.net_income, self.rows.bonus], actual=True),
+            fill=self.styles.positive_fill(),
+            font_color=self.styles.palette.white,
+            bold=True,
+        )
+        self.create_formula_row(
+            worksheet,
+            self.rows.surplus_deficit,
+            "SURPLUS / (DEFICIT)",
+            lambda index, _month: f"={self.month_budget_letter(index)}{self.rows.total_income}-{self.month_budget_letter(index)}{self.rows.total_expenses}-{self.month_budget_letter(index)}{self.rows.savings_transfer}",
+            lambda index, _month: f"={self.month_actual_letter(index)}{self.rows.total_income}-{self.month_actual_letter(index)}{self.rows.total_expenses}-{self.month_actual_letter(index)}{self.rows.savings_transfer}",
+            fill=self.styles.section_fill(),
+            font_color=self.styles.palette.white,
+            bold=True,
+        )
+        self.create_formula_row(
+            worksheet,
+            self.rows.savings_rate,
+            "Savings Rate %",
+            lambda index, _month: f"=IF({self.month_budget_letter(index)}{self.rows.total_income}=0,0,{self.month_budget_letter(index)}{self.rows.savings_transfer}/{self.month_budget_letter(index)}{self.rows.total_income})",
+            lambda index, _month: f"=IF({self.month_actual_letter(index)}{self.rows.total_income}=0,0,{self.month_actual_letter(index)}{self.rows.savings_transfer}/{self.month_actual_letter(index)}{self.rows.total_income})",
+            use_percent=True,
+        )
+        self._create_running_savings_row(worksheet)
 
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"={col}{row-1}-{col}{row-2}-{col}{savings_row}"
-            cell.font = Font(bold=True, size=11, color=self.styles.palette.white)
-            cell.fill = accent_fill
+    def _create_running_savings_row(self, worksheet) -> None:
+        self._set_row_label(worksheet, self.rows.running_savings, "Running Savings Balance", bold=True)
+        for index, _month in enumerate(self.config.months):
+            budget_col = self.month_budget_col(index)
+            actual_col = self.month_actual_col(index)
+            variance_col = self.month_variance_col(index)
+            if index == 0:
+                budget_formula = f"={self.month_budget_letter(index)}{self.rows.starting_savings}+{self.month_budget_letter(index)}{self.rows.savings_transfer}"
+                actual_formula = f"={self.month_actual_letter(index)}{self.rows.starting_savings}+{self.month_actual_letter(index)}{self.rows.savings_transfer}"
+            else:
+                previous_budget_col = get_column_letter(self.month_budget_col(index - 1))
+                previous_actual_col = get_column_letter(self.month_actual_col(index - 1))
+                budget_formula = f"={previous_budget_col}{self.rows.running_savings}+{self.month_budget_letter(index)}{self.rows.savings_transfer}"
+                actual_formula = f"={previous_actual_col}{self.rows.running_savings}+{self.month_actual_letter(index)}{self.rows.savings_transfer}"
+
+            worksheet.cell(row=self.rows.running_savings, column=budget_col).value = budget_formula
+            worksheet.cell(row=self.rows.running_savings, column=actual_col).value = actual_formula
+            worksheet.cell(row=self.rows.running_savings, column=variance_col).value = f"={get_column_letter(actual_col)}{self.rows.running_savings}-{get_column_letter(budget_col)}{self.rows.running_savings}"
+            for col in (budget_col, actual_col, variance_col):
+                cell = worksheet.cell(row=self.rows.running_savings, column=col)
+                cell.font = self.styles.calc_font()
+                cell.border = self.styles.thin_border
+                cell.alignment = self.styles.right_alignment()
+                cell.number_format = self.config.currency_format
+        worksheet.cell(row=self.rows.running_savings, column=self.year_budget_col()).value = f"={self.month_budget_letter(len(self.config.months)-1)}{self.rows.running_savings}"
+        worksheet.cell(row=self.rows.running_savings, column=self.year_actual_col()).value = f"={self.month_actual_letter(len(self.config.months)-1)}{self.rows.running_savings}"
+        worksheet.cell(row=self.rows.running_savings, column=self.year_variance_col()).value = f"={self.year_actual_letter()}{self.rows.running_savings}-{self.year_budget_letter()}{self.rows.running_savings}"
+        for col in (self.year_budget_col(), self.year_actual_col(), self.year_variance_col()):
+            cell = worksheet.cell(row=self.rows.running_savings, column=col)
+            cell.font = self.styles.calc_font()
             cell.border = self.styles.thin_border
             cell.alignment = self.styles.right_alignment()
             cell.number_format = self.config.currency_format
 
-        worksheet[f"O{row}"] = f"=SUM(C{row}:N{row})"
-        worksheet[f"O{row}"].font = Font(bold=True, size=11, color=self.styles.palette.white)
-        worksheet[f"O{row}"].fill = accent_fill
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
-
-    def _create_savings_rate_row(self, worksheet, row: int, *, savings_row: int) -> int:
-        worksheet[f"B{row}"] = "Savings Rate %"
-        worksheet[f"B{row}"].font = Font(size=10, bold=True, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
-
-        for index in range(12):
-            col = get_column_letter(3 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"=IF({col}{row-2}=0,0,{col}{savings_row}/{col}{row-2})"
-            cell.font = self.styles.calc_font()
+    def _create_grocery_detail_table(self, worksheet, start_row: int) -> int:
+        self.create_section_header(worksheet, 47, "DETAIL TABLES")
+        self.create_section_header(worksheet, 48, "GROCERY DETAIL (ROLLS UP TO GROCERIES ROW ABOVE)")
+        headers = ["Group", "Item", *self._detail_value_headers(), "Year Budget", "Year Actual", "Year Variance"]
+        for index, header in enumerate(headers, start=2):
+            cell = worksheet.cell(row=start_row, column=index)
+            cell.value = header
+            cell.font = self.styles.header_font()
+            cell.fill = self.styles.header_fill()
             cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.percent_format
+            cell.alignment = self.styles.center_alignment() if index > 3 else self.styles.left_alignment()
 
-        worksheet[f"O{row}"] = f"=IF(O{row-2}=0,0,O{savings_row}/O{row-2})"
-        worksheet[f"O{row}"].font = self.styles.calc_font()
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.percent_format
-        return row + 1
+        current_row = start_row + 1
+        for group, items in self._grocery_seed_data():
+            for item in items:
+                self._write_detail_row(worksheet, current_row, group, item)
+                current_row += 1
+            for _ in range(3):
+                self._write_detail_row(worksheet, current_row, group, "")
+                current_row += 1
 
-    def _create_running_savings_row(
-        self,
-        worksheet,
-        row: int,
-        *,
-        starting_savings_row: int,
-        savings_row: int,
-    ) -> int:
-        worksheet[f"B{row}"] = "Running Savings Balance"
-        worksheet[f"B{row}"].font = Font(size=10, bold=True, color=self.styles.palette.text_dark)
-        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
-        worksheet[f"B{row}"].border = self.styles.thin_border
+        self._add_table(
+            worksheet,
+            self.grocery_table_name,
+            start_row,
+            current_row - 1,
+            len(headers) + 1,
+        )
+        return current_row - 1
 
-        worksheet[f"C{row}"] = f"=C{starting_savings_row}+C{savings_row}"
-        worksheet[f"C{row}"].font = self.styles.calc_font()
-        worksheet[f"C{row}"].border = self.styles.thin_border
-        worksheet[f"C{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"C{row}"].number_format = self.config.currency_format
-
-        for index in range(1, 12):
-            col = get_column_letter(3 + index)
-            previous_col = get_column_letter(2 + index)
-            cell = worksheet[f"{col}{row}"]
-            cell.value = f"={previous_col}{row}+{col}{savings_row}"
-            cell.font = self.styles.calc_font()
+    def _create_custom_variable_table(self, worksheet, start_row: int) -> int:
+        self.create_section_header(worksheet, start_row - 1, "ADDITIONAL VARIABLE ITEMS (ROLLS UP TO CUSTOM VARIABLE TOTAL)")
+        headers = ["Category", "Item", *self._detail_value_headers(), "Year Budget", "Year Actual", "Year Variance"]
+        for index, header in enumerate(headers, start=2):
+            cell = worksheet.cell(row=start_row, column=index)
+            cell.value = header
+            cell.font = self.styles.header_font()
+            cell.fill = self.styles.header_fill()
             cell.border = self.styles.thin_border
-            cell.alignment = self.styles.right_alignment()
-            cell.number_format = self.config.currency_format
+            cell.alignment = self.styles.center_alignment() if index > 3 else self.styles.left_alignment()
 
-        worksheet[f"O{row}"] = f"=N{row}"
-        worksheet[f"O{row}"].font = self.styles.calc_font()
-        worksheet[f"O{row}"].border = self.styles.thin_border
-        worksheet[f"O{row}"].alignment = self.styles.right_alignment()
-        worksheet[f"O{row}"].number_format = self.config.currency_format
-        return row + 1
+        current_row = start_row + 1
+        for category in ["Personal Care", "Entertainment", "Gifts", "Medical", "Other"]:
+            self._write_detail_row(worksheet, current_row, category, "")
+            current_row += 1
 
-    def _store_hidden_references(self, worksheet) -> None:
-        worksheet["Q5"] = "KEY ROW REFERENCE"
-        worksheet["Q5"].font = Font(bold=True, color=self.styles.palette.header_dark)
+        self._add_table(
+            worksheet,
+            self.custom_variable_table_name,
+            start_row,
+            current_row - 1,
+            len(headers) + 1,
+        )
+        return current_row - 1
 
-        references = [
-            ("Net Income Row:", self.rows.net_income),
-            ("Total Expenses Row:", self.rows.total_expenses),
-            ("Total Income Row:", self.rows.total_income),
-            ("Savings Row:", self.rows.savings_transfer),
-            ("Bonus Row:", self.rows.bonus),
-            ("Surplus Row:", self.rows.surplus_deficit),
-            ("Savings Rate Row:", self.rows.savings_rate),
-            ("Running Savings Row:", self.rows.running_savings),
+    def _create_detail_notes(self, worksheet, start_row: int) -> None:
+        worksheet[f"B{start_row}"] = "DETAIL SECTION NOTES"
+        worksheet[f"B{start_row}"].font = Font(size=12, bold=True, color=self.styles.palette.header_dark)
+        notes = [
+            "• Enter Budget and Actual values only in the white table cells; Variance and yearly totals calculate automatically.",
+            "• Add new grocery rows inside GroceryDetailTable to keep Groceries totals, dashboards, and charts in sync.",
+            "• Add new custom variable rows inside VariableExpenseTable to extend the model without changing formulas.",
+            "• To support more months, extend WorkbookConfig.months and regenerate the workbook so every sheet and chart expands safely.",
         ]
+        for offset, note in enumerate(notes, start=2):
+            worksheet[f"B{start_row + offset}"] = note
+            worksheet[f"B{start_row + offset}"].font = Font(size=10, color="555555")
+            worksheet.merge_cells(start_row=start_row + offset, start_column=2, end_row=start_row + offset, end_column=self.last_data_col())
 
-        for index, (label, row_number) in enumerate(references):
-            worksheet[f"Q{7 + index}"] = label
-            worksheet[f"R{7 + index}"] = row_number
+    def _write_detail_row(self, worksheet, row: int, group: str, item: str) -> None:
+        worksheet[f"B{row}"] = group
+        worksheet[f"C{row}"] = item
+        worksheet[f"B{row}"].font = Font(size=10, color=self.styles.palette.text_dark)
+        worksheet[f"C{row}"].font = Font(size=10, color=self.styles.palette.text_dark)
+        worksheet[f"B{row}"].border = self.styles.thin_border
+        worksheet[f"C{row}"].border = self.styles.thin_border
+        worksheet[f"B{row}"].alignment = self.styles.left_alignment()
+        worksheet[f"C{row}"].alignment = self.styles.left_alignment()
+
+        for index, month in enumerate(self.config.months):
+            budget_col = self.month_budget_col(index) + 1
+            actual_col = self.month_actual_col(index) + 1
+            variance_col = self.month_variance_col(index) + 1
+            budget_letter = get_column_letter(budget_col)
+            actual_letter = get_column_letter(actual_col)
+            variance_letter = get_column_letter(variance_col)
+            worksheet[f"{budget_letter}{row}"].font = self.styles.input_font()
+            worksheet[f"{actual_letter}{row}"].font = self.styles.input_font()
+            worksheet[f"{variance_letter}{row}"].font = self.styles.calc_font()
+            worksheet[f"{variance_letter}{row}"] = f"={actual_letter}{row}-{budget_letter}{row}"
+            for letter in (budget_letter, actual_letter, variance_letter):
+                worksheet[f"{letter}{row}"].border = self.styles.thin_border
+                worksheet[f"{letter}{row}"].alignment = self.styles.right_alignment()
+                worksheet[f"{letter}{row}"].number_format = self.config.currency_format
+
+        year_budget_letter = get_column_letter(self.year_budget_col() + 1)
+        year_actual_letter = get_column_letter(self.year_actual_col() + 1)
+        year_variance_letter = get_column_letter(self.year_variance_col() + 1)
+        budget_cells = [f"{get_column_letter(self.month_budget_col(index) + 1)}{row}" for index in range(len(self.config.months))]
+        actual_cells = [f"{get_column_letter(self.month_actual_col(index) + 1)}{row}" for index in range(len(self.config.months))]
+        worksheet[f"{year_budget_letter}{row}"] = f"=SUM({','.join(budget_cells)})"
+        worksheet[f"{year_actual_letter}{row}"] = f"=SUM({','.join(actual_cells)})"
+        worksheet[f"{year_variance_letter}{row}"] = f"={year_actual_letter}{row}-{year_budget_letter}{row}"
+        for letter in (year_budget_letter, year_actual_letter, year_variance_letter):
+            worksheet[f"{letter}{row}"].font = self.styles.calc_font()
+            worksheet[f"{letter}{row}"].border = self.styles.thin_border
+            worksheet[f"{letter}{row}"].alignment = self.styles.right_alignment()
+            worksheet[f"{letter}{row}"].number_format = self.config.currency_format
+
+    def _detail_value_headers(self) -> Iterable[str]:
+        for month in self.config.months:
+            yield f"{month} Budget"
+            yield f"{month} Actual"
+            yield f"{month} Variance"
+
+    def _add_table(self, worksheet, table_name: str, start_row: int, end_row: int, end_col: int) -> None:
+        table = Table(
+            displayName=table_name,
+            ref=f"B{start_row}:{get_column_letter(end_col)}{end_row}",
+        )
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        worksheet.add_table(table)
+
+    def _apply_variance_formatting(self, worksheet, grocery_table_end: int, custom_table_end: int) -> None:
+        self.add_variance_conditional_formatting(worksheet, self.rows.data, self.rows.total_expenses)
+        self.add_variance_conditional_formatting(worksheet, self.rows.groceries, self.rows.custom_variable_total)
+        detail_variance_columns = [self.month_variance_col(index) + 1 for index in range(len(self.config.months))]
+        detail_variance_columns.append(self.year_variance_col() + 1)
+        self.add_variance_conditional_formatting(worksheet, 50, grocery_table_end, columns=detail_variance_columns)
+        self.add_variance_conditional_formatting(worksheet, grocery_table_end + 5, custom_table_end, columns=detail_variance_columns)
+
+    def _sum_row_formula(self, index: int, rows: list[int], *, actual: bool) -> str:
+        col_letter = self.month_actual_letter(index) if actual else self.month_budget_letter(index)
+        return "=" + "+".join(f"{col_letter}{row}" for row in rows)
+
+    def _grocery_seed_data(self) -> list[tuple[str, list[str]]]:
+        return [
+            (
+                "Grains / Staples",
+                [
+                    "Rice (2KG x 2)",
+                    "Maize Meal (2.5KG)",
+                    "Mr Pasta (500G x 2)",
+                    "Spaghetti",
+                    "Spar Noodles",
+                    "Samp and Beans (500G)",
+                ],
+            ),
+            (
+                "Protein / Meat",
+                [
+                    "Farmers Choice Chicken Braai Pack (+-2000g)",
+                    "Beef (1kg)",
+                    "Spar Mince",
+                    "Rise Spar Sausage",
+                    "Fish (410G x 2)",
+                    "Baked Beans (410G x 2)",
+                    "Eggs (30)",
+                    "Peanut Butter YUM YUM",
+                ],
+            ),
+            (
+                "Vegetables",
+                [
+                    "McCain Frozen Mixed Veg (250g)",
+                    "McCain Frozen Peas (250g)",
+                    "McCain Garden Mix (250g)",
+                    "SweetCorn (4)",
+                    "Potatoes (4kg)",
+                    "Carrots (3kg)",
+                    "Butternut (4kg)",
+                    "Onion (1kg)",
+                    "Ginger Garlic (150g)",
+                    "Mixed Pepper (4)",
+                    "Cucumber",
+                ],
+            ),
+            (
+                "Spices / Condiments",
+                [
+                    "Steak and Chops Spice (160g)",
+                    "Chicken Spice (160g)",
+                    "BBQ Spice (160g)",
+                    "Black Pepper (160g)",
+                    "Aromat (200g)",
+                    "6 Gun Spice (200g)",
+                    "Rajah Mild 'n' Spicy (160g)",
+                    "Mayonnaise Nola (750g)",
+                    "Wellington Tomato Sauce",
+                    "Wellington Sweet Chilli (500ml)",
+                    "Tomato Paste (2 x 50g)",
+                    "Champion Braai (375ml)",
+                    "Chutney (470g)",
+                ],
+            ),
+            (
+                "Cereals / Breakfast",
+                [
+                    "Corn Flakes (1kg)",
+                    "Coco Pops (350g)",
+                    "Nutrific (200g)",
+                    "Muesli (350g)",
+                    "Future Life (500g)",
+                ],
+            ),
+            (
+                "Fruit",
+                [
+                    "Apples (2kg)",
+                    "Bananas (1.2kg)",
+                    "Spar Peaches",
+                    "Frozen Berries (350g)",
+                    "Canned Fruit (850g)",
+                    "Lemon (800g)",
+                ],
+            ),
+            (
+                "Dairy / Fridge Items",
+                [
+                    "Milk (1L x 6)",
+                    "Cheese",
+                    "Rama",
+                ],
+            ),
+            (
+                "Household / Cooking Items",
+                [
+                    "Sugar Selati (2kg)",
+                ],
+            ),
+            (
+                "Snacks",
+                [
+                    "Ice Cream (80ml)",
+                    "Doritos (2 x 145g)",
+                ],
+            ),
+        ]

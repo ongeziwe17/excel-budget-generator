@@ -2,14 +2,11 @@
 
 ## Prerequisites
 
-- Python 3.11+ recommended
+- Python 3.10+
 - `pip`
-- Microsoft Excel, LibreOffice Calc, or another spreadsheet application capable of opening `.xlsx` files
+- Excel or another `.xlsx`-compatible spreadsheet application
 
 ## Setup
-
-1. Create and activate a virtual environment.
-2. Install project dependencies.
 
 ```bash
 python -m venv .venv
@@ -17,39 +14,41 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run the workbook generator
+## Generate the workbook
 
 ```bash
 python main.py
 ```
 
-## Alternate backward-compatible entry point
+## Backward-compatible entry point
 
 ```bash
 python budget_workbook_generator.py
 ```
 
-## Output
+## Where to enter values manually
 
-The default output file is:
+Enter values on the **Monthly Entry** sheet in:
 
-```text
-Personal_Budget_Workbook.xlsx
-```
+- Budget cells for planned amounts
+- Actual cells for real money flow
 
-## Customization guidance
+Leave formula-driven cells alone:
 
-If you need to change workbook defaults, update `WorkbookConfig` in `budget_workbook/config.py`.
+- Variance
+- Year totals
+- Groceries rollups
+- Additional variable rollups
+- dashboard metrics
 
-Common examples:
+## Expandable sections
 
-- change default rent amount
-- change growth rate assumption
-- change output file name
-- change salary and bonus assumptions
+### Grocery detail
+Use `GroceryDetailTable` for starter grocery rows and future additions.
 
-## Developer notes
+### Custom variable items
+Use `VariableExpenseTable` for new variable-expense rows that do not fit the main fixed categories.
 
-- Add shared sheet helpers in `budget_workbook/builders/base.py`.
-- Add new worksheets as builder classes under `budget_workbook/builders/`.
-- Register new sheet builders in `budget_workbook/generator.py`.
+## Extending months safely
+
+To add months beyond the current configuration, update `WorkbookConfig.months` and regenerate the workbook so every sheet, formula block, and chart uses the same month layout.
