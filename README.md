@@ -1,30 +1,18 @@
 # Excel Budget Generator
 
-A maintainable, modular Python project that generates a personal budgeting workbook in Excel using `openpyxl`.
+A modular Python project that generates an enhanced personal budgeting workbook in Excel using `openpyxl`.
 
-## What it generates
+## What the workbook now supports
 
-The workbook includes the following sheets:
+- Budget vs Actual tracking for each month
+- automatic Variance calculations using `Actual - Budget`
+- conditional formatting for overspend / under-budget visibility
+- a structured grocery detail table that rolls into the main Groceries row
+- an expandable custom variable-expense table
+- formula-driven summary totals, dashboards, and trend analysis
+- bonus tracking, emergency fund tracking, and a five-year projection
 
-- Cover
-- Monthly Entry
-- Summary Dashboard
-- Trend Analysis
-- Bonus Tracker
-- Emergency Fund
-- 5-Year Projection
-
-The generated workbook supports:
-
-- manual monthly entry for income and expenses
-- automatic yearly totals
-- calculated savings metrics
-- spending and savings trend analysis
-- bonus tracking
-- emergency fund progress tracking
-- five-year savings projections
-
-## Recommended project structure
+## Project structure
 
 ```text
 excel-budget-generator/
@@ -44,46 +32,47 @@ excel-budget-generator/
 │       ├── summary_dashboard.py
 │       └── trend_analysis.py
 ├── budget_workbook_generator.py
+├── instructions.md
 ├── main.py
 ├── requirements.txt
-├── instructions.md
 └── README.md
 ```
 
-## Module overview
+## Key workbook enhancements
 
-### `budget_workbook/config.py`
-Holds workbook defaults and business configuration in a small immutable dataclass.
+### 1. Budget vs Actual columns
+The Monthly Entry sheet now uses Budget, Actual, and Variance triplets for every month and year total block.
 
-### `budget_workbook/styles.py`
-Centralizes palette and reusable style factories so formatting is consistent and easy to update.
+### 2. Expandable detail tables
+Two Excel tables keep the model extendable:
 
-### `budget_workbook/rows.py`
-Stores Monthly Entry row references in one place to keep formulas readable and maintainable.
+- `GroceryDetailTable`
+- `VariableExpenseTable`
 
-### `budget_workbook/builders/base.py`
-Provides shared helper behavior for sheet builders, including reusable row and section creation logic.
+New rows added inside those tables automatically feed the summary Groceries and Additional Variable Items rows.
 
-### `budget_workbook/builders/*.py`
-Each builder owns one worksheet and keeps worksheet-specific logic isolated.
+### 3. Grocery starter structure
+The grocery section includes starter rows for:
 
-### `budget_workbook/generator.py`
-Coordinates the full workbook build and saves the final `.xlsx` file.
+- Grains / Staples
+- Protein / Meat
+- Vegetables
+- Spices / Condiments
+- Cereals / Breakfast
+- Fruit
+- Dairy / Fridge Items
+- Household / Cooking Items
+- Snacks
 
-### `main.py`
-Simple executable entry point for normal use.
+Extra blank rows are included for future custom grocery items.
 
-### `budget_workbook_generator.py`
-Backward-compatible wrapper that preserves the original function name.
+### 4. Dynamic rollups
+The workbook keeps calculations formula-driven:
 
-## Improvements made in this refactor
-
-- Split the single-file script into focused modules.
-- Introduced class-based sheet builders with clear ownership.
-- Centralized styles, config, and row references.
-- Preserved the workbook formulas and layout behavior.
-- Added a stable entry point and retained backward compatibility.
-- Added lightweight project documentation and installation guidance.
+- Groceries summary rows pull from `GroceryDetailTable`
+- Additional variable totals pull from `VariableExpenseTable`
+- dashboard metrics reference Monthly Entry summary rows
+- charts reference summary tables so row additions in the detail tables flow through automatically
 
 ## Installation
 
@@ -95,26 +84,36 @@ pip install -r requirements.txt
 
 ## How to run
 
-Generate the workbook with the standard entry point:
-
 ```bash
 python main.py
 ```
 
-Or use the compatibility wrapper:
+Backward-compatible wrapper:
 
 ```bash
 python budget_workbook_generator.py
 ```
 
-The workbook will be saved as:
+## Manual input guidance
 
-```text
-Personal_Budget_Workbook.xlsx
-```
+Enter values manually in:
 
-## Notes
+- Budget cells for planned amounts
+- Actual cells for real spent / received amounts
 
-- The workbook is designed around manual monthly entry.
-- Most calculations happen through Excel formulas embedded by `openpyxl`.
-- The default currency formatting is South African Rand (ZAR).
+Do **not** edit:
+
+- Variance cells
+- Year total cells
+- rollup formulas
+
+## Safe extension guidance
+
+### Add grocery items
+Add rows inside `GroceryDetailTable`. The Groceries summary row, dashboards, and charts will continue to use the table totals.
+
+### Add custom variable expenses
+Add rows inside `VariableExpenseTable`. The Additional Variable Items total row and downstream summaries will update automatically.
+
+### Add more months
+Update `WorkbookConfig.months` in `budget_workbook/config.py` and regenerate the workbook. All grouped month columns, formulas, and summary sheets are generated from that list.
