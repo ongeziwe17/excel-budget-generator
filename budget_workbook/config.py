@@ -1,6 +1,9 @@
 """Configuration models for the budget workbook generator."""
 
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from .versioning import WorkbookVersion
 
 
 @dataclass(frozen=True)
@@ -16,7 +19,11 @@ class WorkbookConfig:
     bonus_q4_pct: float = 0.83
     default_rent_amount: int = 8_000
     annual_growth_rate: float = 0.08
-    output_path: str = "Personal_Budget_Workbook.xlsx"
+    workbook_name_prefix: str = "Personal_Budget_Workbook"
+    workbook_version: WorkbookVersion = field(default_factory=WorkbookVersion)
+    output_dir: Path = field(
+        default_factory=lambda: Path(__file__).resolve().parent.parent / "workbooks"
+    )
     months: tuple[str, ...] = field(
         default_factory=lambda: (
             "Jan",
@@ -33,3 +40,11 @@ class WorkbookConfig:
             "Dec",
         )
     )
+
+    @property
+    def output_filename(self) -> str:
+        return f"{self.workbook_name_prefix}_{self.workbook_version}.xlsx"
+
+    @property
+    def output_path(self) -> Path:
+        return self.output_dir / self.output_filename

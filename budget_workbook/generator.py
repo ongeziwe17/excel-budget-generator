@@ -33,11 +33,21 @@ class BudgetWorkbookGenerator:
             FiveYearProjectionSheetBuilder(self.config, self.styles, self.rows),
         ]
 
-    def create_workbook(self, output_path: str | None = None) -> Path:
-        """Generate the workbook and return the saved file path."""
-        target_path = Path(output_path or self.config.output_path)
-        workbook = Workbook()
+    def create_workbook(self, output_path: str | Path | None = None) -> Path:
+        """Generate the workbook and return the saved file path.
 
+        Existing versioned files are preserved. If the target path already exists,
+        callers should bump the workbook version or choose a new custom path.
+        """
+        target_path = Path(output_path) if output_path is not None else self.config.output_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if target_path.exists():
+            raise FileExistsError(
+                f"Workbook already exists at {target_path}. "
+                "Increment the workbook version or choose a different output path."
+            )
+
+        workbook = Workbook()
         for builder in self.sheet_builders:
             builder.build(workbook)
 

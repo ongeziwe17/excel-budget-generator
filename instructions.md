@@ -26,6 +26,36 @@ python main.py
 python budget_workbook_generator.py
 ```
 
+## Where files are stored
+
+All generated workbooks must be stored in:
+
+```text
+/workbooks/
+```
+
+The default generated file is:
+
+```text
+workbooks/Personal_Budget_Workbook_v0.0.0.xlsx
+```
+
+## Versioning approach
+
+Workbook filenames follow semantic-style versioning:
+
+- `v0.0.0` for the initial versioned workbook
+- `v0.1.0` for minor workbook enhancements
+- `v1.0.0` for a stable major release
+
+Update `WorkbookConfig.workbook_version` before generating a new structural version.
+
+## Important workbook handling rules
+
+- Do not overwrite older workbook versions
+- Keep previous files in `workbooks/` for rollback and tracking
+- If generation fails because the file already exists, bump the version and rerun
+
 ## Where to enter values manually
 
 Enter values on the **Monthly Entry** sheet in:
