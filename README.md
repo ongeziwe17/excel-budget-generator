@@ -127,6 +127,7 @@ Two Excel tables keep the model extendable:
 New rows added inside those tables automatically feed the summary Groceries and Additional Variable Items rows.
 
 ### Grocery starter structure
+
 The grocery section includes starter rows for:
 
 - Grains / Staples
@@ -142,6 +143,7 @@ The grocery section includes starter rows for:
 Extra blank rows are included for future custom grocery items.
 
 ### Dynamic rollups
+
 The workbook keeps calculations formula-driven:
 
 - Groceries summary rows pull from `GroceryDetailTable`
@@ -151,10 +153,45 @@ The workbook keeps calculations formula-driven:
 
 ## Installation
 
+### Python
+
+Ensure you have python installed on your machine, if not:
+
+[Download the latest version for Windows👈](https://www.python.org/downloads/)
+
+[Download the latest version for Linux/Unix👇]
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip
+python3 --version
+```
+
+### Windows / PowerShell
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+### Linux
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+To confirm if you are within the python virtual environment, run:
+
+```bash
+python -c "import sys; print(sys.executable)"
+```
+
+response should show you a relative path to, e.g:
+
+```bash
+C:\path\to\project\.venv\Scripts\python.exe
 ```
 
 ## How to run
