@@ -79,17 +79,31 @@ Personal_Budget_Workbook_v0.0.0.xlsx
 
 - New files are written to `workbooks/`
 - Existing versioned files are **not overwritten**
-- If the target filename already exists, generation raises an error so you can bump the version first
+- Repeated runs auto-create the next patch version (for example `v0.0.0`, `v0.0.1`, `v0.0.2`)
 - Older files stay in place for rollback and historical tracking
+- Invalid or unrelated filenames in `workbooks/` are ignored during version detection
+
+
+## Automatic version progression
+
+Running `python main.py` repeatedly does not fail on existing files.
+
+Example sequence:
+
+```text
+workbooks/Personal_Budget_Workbook_v0.0.0.xlsx
+workbooks/Personal_Budget_Workbook_v0.0.1.xlsx
+workbooks/Personal_Budget_Workbook_v0.0.2.xlsx
+```
+
+By default, generation increments the **patch** number using the highest existing patch for the configured major/minor pair.
 
 ## What should trigger a version bump
 
 ### Patch bump (`v0.0.1`)
-
 Use when changing documentation or implementation details that do not alter the workbook structure.
 
 ### Minor bump (`v0.1.0`)
-
 Use when adding or enhancing workbook features without redefining the whole model, for example:
 
 - adding a new dashboard metric
@@ -97,17 +111,14 @@ Use when adding or enhancing workbook features without redefining the whole mode
 - extending formulas or charts
 
 ### Major bump (`v1.0.0`)
-
 Use when making a stable release or introducing a significant workbook structure change.
 
 ## Key workbook enhancements already supported
 
 ### Budget vs Actual columns
-
 The Monthly Entry sheet uses Budget, Actual, and Variance triplets for every month and year total block.
 
 ### Expandable detail tables
-
 Two Excel tables keep the model extendable:
 
 - `GroceryDetailTable`
@@ -211,13 +222,10 @@ Do **not** edit:
 ## Safe extension guidance
 
 ### Add grocery items
-
 Add rows inside `GroceryDetailTable`. The Groceries summary row, dashboards, and charts will continue to use the table totals.
 
 ### Add custom variable expenses
-
 Add rows inside `VariableExpenseTable`. The Additional Variable Items total row and downstream summaries will update automatically.
 
 ### Add more months
-
 Update `WorkbookConfig.months` in `budget_workbook/config.py` and regenerate the workbook. All grouped month columns, formulas, and summary sheets are generated from that list.

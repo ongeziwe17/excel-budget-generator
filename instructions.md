@@ -54,7 +54,16 @@ Update `WorkbookConfig.workbook_version` before generating a new structural vers
 
 - Do not overwrite older workbook versions
 - Keep previous files in `workbooks/` for rollback and tracking
-- If generation fails because the file already exists, bump the version and rerun
+- Repeated runs auto-generate the next patch versioned filename
+- Invalid or unrelated files in `workbooks/` are ignored by version detection
+
+Example repeated runs:
+
+```text
+workbooks/Personal_Budget_Workbook_v0.0.0.xlsx
+workbooks/Personal_Budget_Workbook_v0.0.1.xlsx
+workbooks/Personal_Budget_Workbook_v0.0.2.xlsx
+```
 
 ## Where to enter values manually
 

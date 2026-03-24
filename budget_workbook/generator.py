@@ -14,6 +14,7 @@ from budget_workbook.builders.trend_analysis import TrendAnalysisSheetBuilder
 from budget_workbook.config import WorkbookConfig
 from budget_workbook.rows import MonthlyEntryRows
 from budget_workbook.styles import WorkbookStyles
+from budget_workbook.versioning import next_available_patch_version, parse_versioned_filename
 
 
 class BudgetWorkbookGenerator:
@@ -36,16 +37,11 @@ class BudgetWorkbookGenerator:
     def create_workbook(self, output_path: str | Path | None = None) -> Path:
         """Generate the workbook and return the saved file path.
 
-        Existing versioned files are preserved. If the target path already exists,
-        callers should bump the workbook version or choose a new custom path.
+        Default generation auto-increments patch versions when prior workbooks exist.
+        Custom non-versioned paths still protect against overwriting existing files.
         """
-        target_path = Path(output_path) if output_path is not None else self.config.output_path
+        target_path = self._resolve_output_path(output_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        if target_path.exists():
-            raise FileExistsError(
-                f"Workbook already exists at {target_path}. "
-                "Increment the workbook version or choose a different output path."
-            )
 
         workbook = Workbook()
         for builder in self.sheet_builders:
@@ -53,3 +49,31 @@ class BudgetWorkbookGenerator:
 
         workbook.save(target_path)
         return target_path
+
+    def _resolve_output_path(self, output_path: str | Path | None) -> Path:
+        if output_path is None:
+            version = next_available_patch_version(
+                directory=self.config.output_dir,
+                prefix=self.config.workbook_name_prefix,
+                start_version=self.config.workbook_version,
+            )
+            return self.config.output_dir / f"{self.config.workbook_name_prefix}_{version}.xlsx"
+
+        target = Path(output_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        parsed = parse_versioned_filename(target.name, self.config.workbook_name_prefix)
+        if parsed is not None:
+            version = next_available_patch_version(
+                directory=target.parent,
+                prefix=self.config.workbook_name_prefix,
+                start_version=parsed,
+            )
+            return target.parent / f"{self.config.workbook_name_prefix}_{version}.xlsx"
+
+        if target.exists():
+            raise FileExistsError(
+                f"Workbook already exists at {target}. "
+                "Provide a new custom output path or use versioned naming."
+            )
+        return target
