@@ -20,6 +20,39 @@ pip install -r requirements.txt
 python main.py
 ```
 
+This preserves the original single-person workbook.
+
+## Generate a couple workbook
+
+```bash
+python main.py \
+  --mode couple \
+  --partner-one-name "Partner 1" \
+  --partner-two-name "Partner 2" \
+  --partner-one-gross-income 36000 \
+  --partner-two-gross-income 24000 \
+  --partner-one-net-income 30000 \
+  --partner-two-net-income 20000
+```
+
+Couple mode keeps each person's finances separate from shared household costs. The consolidated dashboard excludes household contributions because they are internal transfers.
+
+Available shared-cost allocation options:
+
+```bash
+python main.py --mode couple --contribution-method Equal
+```
+
+```bash
+python main.py \
+  --mode couple \
+  --contribution-method Custom \
+  --partner-one-share 0.60 \
+  --partner-two-share 0.40
+```
+
+Custom shares must be decimals between `0` and `1` and must add up to `1`.
+
 ## Backward-compatible entry point
 
 ```bash
@@ -38,6 +71,12 @@ The default generated file is:
 
 ```text
 workbooks/Personal_Budget_Workbook_v0.0.0.xlsx
+```
+
+The initial couple workbook is:
+
+```text
+workbooks/Household_Budget_Workbook_v0.1.0.xlsx
 ```
 
 ## Versioning approach
@@ -79,6 +118,14 @@ Leave formula-driven cells alone:
 - Groceries rollups
 - Additional variable rollups
 - dashboard metrics
+
+For couple workbooks:
+
+- edit household assumptions on `Household Setup`
+- enter personal actuals on `Partner 1 Budget` and `Partner 2 Budget`
+- enter shared expense and joint-savings values on `Shared Household`
+- review combined performance on `Household Dashboard`
+- never enter household contributions a second time on the shared sheet
 
 ## Expandable sections
 

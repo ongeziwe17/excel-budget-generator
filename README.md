@@ -1,6 +1,6 @@
 # Excel Budget Generator
 
-A modular Python project that generates an enhanced personal budgeting workbook in Excel using `openpyxl`.
+A modular Python project that generates personal or two-person household budgeting workbooks in Excel using `openpyxl`.
 
 ## What the workbook supports
 
@@ -11,6 +11,79 @@ A modular Python project that generates an enhanced personal budgeting workbook 
 - an expandable custom variable-expense table
 - formula-driven summary totals, dashboards, and trend analysis
 - bonus tracking, emergency fund tracking, and a five-year projection
+- an optional couple mode with two personal budgets, a shared-household budget, configurable contribution allocation, and a consolidated dashboard
+
+## Budget modes
+
+### Single-person mode
+
+The default remains the original personal workbook, so existing commands and integrations remain compatible.
+
+```bash
+python main.py
+```
+
+### Couple mode
+
+Couple mode creates separate personal budgets for both partners, a shared-household budget, and consolidated household reporting.
+
+```bash
+python main.py \
+  --mode couple \
+  --partner-one-name "Partner 1" \
+  --partner-two-name "Partner 2" \
+  --partner-one-gross-income 36000 \
+  --partner-two-gross-income 24000 \
+  --partner-one-net-income 30000 \
+  --partner-two-net-income 20000
+```
+
+The generated workbook starts at:
+
+```text
+workbooks/Household_Budget_Workbook_v0.1.0.xlsx
+```
+
+Couple workbooks contain:
+
+- `Cover`
+- `Household Dashboard`
+- `Household Setup`
+- `Partner 1 Budget`
+- `Partner 2 Budget`
+- `Shared Household`
+- `Trend Analysis`
+- `Savings Goals`
+- `Bonus Tracker`
+- `5-Year Projection`
+
+Personal and shared expenses are deliberately separate. Partner contributions to the shared household are internal transfers and are excluded from consolidated income and expense totals.
+
+## Shared-cost allocation
+
+The `Household Setup` sheet supports three methods:
+
+- `Income proportional` (default): each partner's share follows their configured net-income share
+- `Equal`: each partner contributes 50%
+- `Custom`: use explicit partner percentages that add up to 100%
+
+The method can be selected when generating the workbook:
+
+```bash
+python main.py --mode couple --contribution-method Equal
+```
+
+For a custom 60% / 40% split:
+
+```bash
+python main.py \
+  --mode couple \
+  --contribution-method Custom \
+  --partner-one-share 0.60 \
+  --partner-two-share 0.40
+```
+
+The allocation method and custom percentages remain editable on `Household Setup` after generation.
 
 ## Folder structure
 
@@ -26,6 +99,7 @@ excel-budget-generator/
 │   └── builders/
 │       ├── base.py
 │       ├── bonus_tracker.py
+│       ├── couple.py
 │       ├── cover.py
 │       ├── emergency_fund.py
 │       ├── five_year_projection.py
@@ -218,6 +292,14 @@ Do **not** edit:
 - Variance cells
 - Year total cells
 - rollup formulas
+
+In couple mode:
+
+- review names, income assumptions, allocation method and opening savings on `Household Setup`
+- enter personal actual income, expenses, savings and household contributions on each partner sheet
+- enter shared expense budgets/actuals and joint savings on `Shared Household`
+- do not enter partner contributions again on `Shared Household`; they are linked from the partner sheets
+- use `Household Dashboard` for combined results
 
 ## Safe extension guidance
 
